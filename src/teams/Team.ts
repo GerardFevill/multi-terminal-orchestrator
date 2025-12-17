@@ -8,38 +8,79 @@ import { ITeam, ITeamMember, IProject, TeamRole, ProjectStatus, ITaskAssigner } 
 import { IAgent } from '../interfaces/IAgent';
 import { ITask, IResult, MessageType } from '../interfaces/IMessage';
 import { IMessageBroker } from '../interfaces/IMessageBroker';
+import { IDomainConfig } from '../interfaces/IDomainConfig';
+import { TaskRouter } from '../domains/TaskRouter';
+import { DomainRegistry } from '../domains/DomainRegistry';
 import { generateId } from '../utils/generateId';
+
+export interface TeamConfig {
+  name: string;
+  messageBroker: IMessageBroker;
+  domainId: string;
+  id?: string;
+}
 
 export class Team implements ITeam, ITaskAssigner {
   readonly id: string;
   readonly name: string;
+  readonly domainId: string;
   members: ITeamMember[] = [];
   currentProject?: IProject;
 
-  private messageBroker: IMessageBroker;
-  private results: Map<string, IResult> = new Map();
+  protected messageBroker: IMessageBroker;
+  protected results: Map<string, IResult> = new Map();
+  protected taskRouter?: TaskRouter;
+  protected domainConfig?: IDomainConfig;
 
+  constructor(config: TeamConfig);
+  constructor(name: string, messageBroker: IMessageBroker, id?: string);
   constructor(
-    name: string,
-    messageBroker: IMessageBroker,
+    configOrName: TeamConfig | string,
+    messageBroker?: IMessageBroker,
     id?: string
   ) {
-    this.id = id || generateId();
-    this.name = name;
-    this.messageBroker = messageBroker;
+    if (typeof configOrName === 'string') {
+      // Legacy constructor
+      this.id = id || generateId();
+      this.name = configOrName;
+      this.messageBroker = messageBroker!;
+      this.domainId = 'development'; // Default
+    } else {
+      // New config-based constructor
+      const config = configOrName;
+      this.id = config.id || generateId();
+      this.name = config.name;
+      this.messageBroker = config.messageBroker;
+      this.domainId = config.domainId;
+
+      // Initialize TaskRouter with domain config
+      this.domainConfig = DomainRegistry.getInstance().get(config.domainId);
+      if (this.domainConfig) {
+        this.taskRouter = new TaskRouter(this.domainConfig);
+      }
+    }
+  }
+
+  /**
+   * Configure le domaine de l'équipe
+   */
+  setDomainConfig(config: IDomainConfig): void {
+    this.domainConfig = config;
+    this.taskRouter = new TaskRouter(config);
   }
 
   // === Gestion des membres ===
 
-  addMember(agent: IAgent, role: TeamRole, skills: string[] = []): void {
+  addMember(agent: IAgent, roleId: string, skills: string[] = []): void {
     const member: ITeamMember = {
       agent,
-      role,
+      roleId,
+      domainId: this.domainId,
       skills,
       availability: 100
     };
     this.members.push(member);
-    console.log(`[Team:${this.name}] Membre ajouté: ${agent.id} (${role})`);
+    console.log(`[Team:${this.name}] Membre ajouté: ${agent.id} (${roleId})`);
   }
 
   removeMember(agentId: string): void {
@@ -50,12 +91,12 @@ export class Team implements ITeam, ITaskAssigner {
     }
   }
 
-  getMemberByRole(role: TeamRole): ITeamMember | undefined {
-    return this.members.find(m => m.role === role);
+  getMemberByRole(roleId: string): ITeamMember | undefined {
+    return this.members.find(m => m.roleId === roleId);
   }
 
-  getMembersByRole(role: TeamRole): ITeamMember[] {
-    return this.members.filter(m => m.role === role);
+  getMembersByRole(roleId: string): ITeamMember[] {
+    return this.members.filter(m => m.roleId === roleId);
   }
 
   // === Gestion de projet ===
@@ -70,7 +111,9 @@ export class Team implements ITeam, ITaskAssigner {
     await this.broadcastToTeam(`Nouveau projet: ${project.name} - ${project.description}`);
 
     // Le lead planifie le projet
-    const lead = this.getMemberByRole(TeamRole.LEAD);
+    const leadRole = this.domainConfig?.roles.find(r => r.canLead);
+    const lead = leadRole ? this.getMemberByRole(leadRole.id) : this.members[0];
+
     if (lead) {
       await this.assignTaskToMember({
         id: `planning-${project.id}`,
@@ -92,8 +135,6 @@ export class Team implements ITeam, ITaskAssigner {
     this.currentProject.status = ProjectStatus.IN_PROGRESS;
     console.log(`[Team:${this.name}] Exécution du projet: ${this.currentProject.name}`);
 
-    const results: IResult[] = [];
-
     // Distribuer les tâches aux membres appropriés
     for (const task of this.currentProject.tasks) {
       const member = this.findBestMember(task, this.members);
@@ -105,11 +146,49 @@ export class Team implements ITeam, ITaskAssigner {
       }
     }
 
-    // Attendre les résultats
-    // Dans une vraie implémentation, on attendrait les callbacks
-
     this.currentProject.status = ProjectStatus.COMPLETED;
     return Array.from(this.results.values());
+  }
+
+  /**
+   * Exécute le pipeline du domaine
+   */
+  async executePipeline(content: string): Promise<IResult[]> {
+    if (!this.domainConfig?.pipelineSteps) {
+      throw new Error('Pas de pipeline défini pour ce domaine');
+    }
+
+    const results: IResult[] = [];
+    let previousResult: IResult | null = null;
+
+    for (const roleId of this.domainConfig.pipelineSteps) {
+      const member = this.getMemberByRole(roleId);
+      if (!member) {
+        console.log(`[Team:${this.name}] Pas de membre pour le rôle ${roleId}, skip`);
+        continue;
+      }
+
+      const stepContent = previousResult !== null
+        ? `${content}\n\nRésultat précédent: ${JSON.stringify((previousResult as IResult).data)}`
+        : content;
+
+      const task: ITask = {
+        id: generateId(),
+        from: `team:${this.id}`,
+        to: member.agent.id,
+        content: stepContent,
+        timestamp: new Date(),
+        type: MessageType.TASK,
+        priority: 1
+      };
+
+      await this.assignTaskToMember(task, member);
+
+      // Dans une vraie implémentation, on attendrait le résultat
+      // previousResult = await this.waitForResult(task.id);
+    }
+
+    return results;
   }
 
   getProjectStatus(): ProjectStatus {
@@ -132,7 +211,6 @@ export class Team implements ITeam, ITaskAssigner {
   }
 
   async requestHelp(fromMemberId: string, skill: string): Promise<ITeamMember | undefined> {
-    // Trouver un membre avec cette compétence
     const helper = this.members.find(m =>
       m.agent.id !== fromMemberId &&
       m.skills.includes(skill) &&
@@ -151,7 +229,7 @@ export class Team implements ITeam, ITaskAssigner {
   // === Distribution de tâches ===
 
   async assignTaskToMember(task: ITask, member: ITeamMember): Promise<void> {
-    member.availability -= 20; // Réduire disponibilité
+    member.availability -= 20;
 
     const taskWithTarget: ITask = {
       ...task,
@@ -159,40 +237,50 @@ export class Team implements ITeam, ITaskAssigner {
     };
 
     await this.messageBroker.send(taskWithTarget);
-    console.log(`[Team:${this.name}] Tâche ${task.id} -> ${member.agent.id} (${member.role})`);
+    console.log(`[Team:${this.name}] Tâche ${task.id} -> ${member.agent.id} (${member.roleId})`);
   }
 
   findBestMember(task: ITask, members: ITeamMember[]): ITeamMember | undefined {
+    // Utilise TaskRouter si disponible
+    if (this.taskRouter) {
+      return this.taskRouter.findBestMember(task, members);
+    }
+
+    // Fallback: logique legacy avec TeamRole
+    return this.findBestMemberLegacy(task, members);
+  }
+
+  /**
+   * Logique legacy de matching (pour compatibilité)
+   * @deprecated Utiliser TaskRouter à la place
+   */
+  private findBestMemberLegacy(task: ITask, members: ITeamMember[]): ITeamMember | undefined {
     const content = task.content.toLowerCase();
 
-    // Logique de matching basée sur le contenu de la tâche
-    const roleMapping: Record<string, TeamRole[]> = {
-      'code': [TeamRole.DEVELOPER, TeamRole.ARCHITECT],
-      'develop': [TeamRole.DEVELOPER],
-      'test': [TeamRole.TESTER],
-      'review': [TeamRole.REVIEWER, TeamRole.LEAD],
-      'design': [TeamRole.ARCHITECT],
-      'analys': [TeamRole.ANALYST],
-      'research': [TeamRole.ANALYST],
-      'plan': [TeamRole.LEAD, TeamRole.ARCHITECT]
+    const roleMapping: Record<string, string[]> = {
+      'code': ['developer', 'architect'],
+      'develop': ['developer'],
+      'test': ['tester'],
+      'review': ['reviewer', 'lead'],
+      'design': ['architect'],
+      'analys': ['analyst'],
+      'research': ['analyst'],
+      'plan': ['lead', 'architect']
     };
 
-    // Trouver les rôles appropriés
-    let targetRoles: TeamRole[] = [];
+    let targetRoles: string[] = [];
     for (const [keyword, roles] of Object.entries(roleMapping)) {
       if (content.includes(keyword)) {
         targetRoles.push(...roles);
       }
     }
 
-    // Si pas de match, donner au développeur
     if (targetRoles.length === 0) {
-      targetRoles = [TeamRole.DEVELOPER];
+      targetRoles = ['developer'];
     }
 
-    // Trouver le meilleur membre disponible
     return members
-      .filter(m => targetRoles.includes(m.role) && m.availability > 0)
+      .filter(m => targetRoles.includes(m.roleId) && m.availability > 0)
       .sort((a, b) => b.availability - a.availability)[0];
   }
 
@@ -201,11 +289,32 @@ export class Team implements ITeam, ITaskAssigner {
   getTeamSummary(): string {
     const summary = [
       `Équipe: ${this.name} (${this.id})`,
+      `Domaine: ${this.domainId}`,
       `Membres: ${this.members.length}`,
-      ...this.members.map(m => `  - ${m.agent.id}: ${m.role} (${m.availability}% dispo)`),
+      ...this.members.map(m => `  - ${m.agent.id}: ${m.roleId} (${m.availability}% dispo)`),
       `Projet: ${this.currentProject?.name || 'Aucun'}`,
       `Status: ${this.getProjectStatus()}`
     ];
     return summary.join('\n');
+  }
+
+  /**
+   * Récupère les statistiques de l'équipe
+   */
+  getStats(): {
+    memberCount: number;
+    availableMembers: number;
+    totalAvailability: number;
+    projectStatus: ProjectStatus;
+  } {
+    const availableMembers = this.members.filter(m => m.availability > 0).length;
+    const totalAvailability = this.members.reduce((sum, m) => sum + m.availability, 0);
+
+    return {
+      memberCount: this.members.length,
+      availableMembers,
+      totalAvailability,
+      projectStatus: this.getProjectStatus()
+    };
   }
 }

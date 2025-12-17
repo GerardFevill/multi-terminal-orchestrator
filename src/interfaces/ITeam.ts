@@ -1,29 +1,10 @@
 /**
  * Interface Segregation (I) - Interfaces pour la gestion d'équipe
+ * Version générique - rôles définis par DomainConfig
  */
 
 import { IAgent } from './IAgent';
 import { ITask, IResult } from './IMessage';
-
-/**
- * Rôles possibles dans une équipe
- */
-export enum TeamRole {
-  // Rôles Dev
-  LEAD = 'lead',              // Chef d'équipe - coordonne
-  DEVELOPER = 'developer',     // Développeur - code
-  REVIEWER = 'reviewer',       // Reviewer - revue de code
-  TESTER = 'tester',          // Testeur - tests
-  ARCHITECT = 'architect',     // Architecte - design
-  ANALYST = 'analyst',        // Analyste - recherche
-
-  // Rôles Social Media
-  CONTENT_CREATOR = 'content_creator',   // Crée le contenu
-  VIDEO_EDITOR = 'video_editor',         // Monte les vidéos
-  COPYWRITER = 'copywriter',             // Rédige les textes
-  COMMUNITY_MANAGER = 'community_manager', // Gère la communauté
-  SOCIAL_MEDIA_MANAGER = 'social_media_manager' // Publie sur les réseaux
-}
 
 /**
  * Plateformes de réseaux sociaux
@@ -50,13 +31,14 @@ export interface IPublishConfig {
 }
 
 /**
- * Membre d'une équipe
+ * Membre d'une équipe (version générique)
  */
 export interface ITeamMember {
   agent: IAgent;
-  role: TeamRole;
+  roleId: string;           // ID du rôle (défini dans DomainConfig)
+  domainId: string;         // ID du domaine (social-media, development, etc.)
   skills: string[];
-  availability: number; // 0-100%
+  availability: number;     // 0-100%
 }
 
 /**
@@ -81,19 +63,20 @@ export enum ProjectStatus {
 }
 
 /**
- * Interface principale d'une équipe
+ * Interface principale d'une équipe (version générique)
  */
 export interface ITeam {
   readonly id: string;
   readonly name: string;
+  readonly domainId: string;  // Domaine de l'équipe
   members: ITeamMember[];
   currentProject?: IProject;
 
   // Gestion des membres
-  addMember(agent: IAgent, role: TeamRole, skills?: string[]): void;
+  addMember(agent: IAgent, roleId: string, skills?: string[]): void;
   removeMember(agentId: string): void;
-  getMemberByRole(role: TeamRole): ITeamMember | undefined;
-  getMembersByRole(role: TeamRole): ITeamMember[];
+  getMemberByRole(roleId: string): ITeamMember | undefined;
+  getMembersByRole(roleId: string): ITeamMember[];
 
   // Gestion de projet
   assignProject(project: IProject): Promise<void>;
@@ -111,4 +94,24 @@ export interface ITeam {
 export interface ITaskAssigner {
   assignTaskToMember(task: ITask, member: ITeamMember): Promise<void>;
   findBestMember(task: ITask, members: ITeamMember[]): ITeamMember | undefined;
+}
+
+/**
+ * Ancien enum conservé pour compatibilité (deprecated)
+ * @deprecated Utiliser DomainConfig à la place
+ */
+export enum TeamRole {
+  // Rôles Dev
+  LEAD = 'lead',
+  DEVELOPER = 'developer',
+  REVIEWER = 'reviewer',
+  TESTER = 'tester',
+  ARCHITECT = 'architect',
+  ANALYST = 'analyst',
+  // Rôles Social Media
+  CONTENT_CREATOR = 'content_creator',
+  VIDEO_EDITOR = 'video_editor',
+  COPYWRITER = 'copywriter',
+  COMMUNITY_MANAGER = 'community_manager',
+  SOCIAL_MEDIA_MANAGER = 'social_media_manager'
 }

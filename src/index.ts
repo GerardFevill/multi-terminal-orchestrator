@@ -1,80 +1,162 @@
 /**
- * Point d'entrée - Lance de vrais terminaux Claude
+ * Point d'entrée - Multi-Agent Orchestrator v2
+ * Avec Redis, Domaines génériques, et Teams configurables
  */
 
-import { ClaudeProcessBroker } from './communication/ClaudeProcessBroker';
-import { MessageType } from './interfaces/IMessage';
+// Redis
+import { RedisClient } from './redis/RedisClient';
+import { RedisMessageBroker } from './redis/RedisMessageBroker';
+import { RedisCache } from './redis/RedisCache';
+import { RedisStateStore } from './redis/RedisStateStore';
+import { RedisTaskQueue } from './redis/RedisTaskQueue';
+
+// Domaines
+import { DomainRegistry } from './domains/DomainRegistry';
+import { registerDefaultDomains } from './domains/configs';
+
+// Agents
+import { CoordinatorAgent } from './agents/CoordinatorAgent';
+import { WorkerAgent } from './agents/WorkerAgent';
+import { createDefaultHandlers } from './tasks/TaskHandlers';
+
+// Teams
+import { TeamFactory } from './teams/TeamFactory';
+import { Team } from './teams/Team';
+
+// Interfaces
+import { MessageType, ITask } from './interfaces/IMessage';
+
+// Simulation
+import { SocialApiSimulator } from './simulation/SocialApiSimulator';
 
 async function main() {
   console.log('╔═══════════════════════════════════════════════════════════╗');
-  console.log('║   MULTI-CLAUDE ORCHESTRATOR - TypeScript + SOLID          ║');
+  console.log('║   MULTI-AGENT ORCHESTRATOR v2 - Redis + MCP               ║');
   console.log('╚═══════════════════════════════════════════════════════════╝\n');
 
-  const broker = new ClaudeProcessBroker('./claude-comm');
+  // 1. Initialisation Redis
+  console.log('[1/5] Initialisation Redis...');
+  const redisClient = RedisClient.getInstance();
 
-  // Initialiser
-  await broker.connect();
-
-  // Lancer les agents Claude
-  console.log('Lancement des agents Claude...\n');
-  await broker.spawnClaudeAgent('agent-1', 'coordinator');
-  await broker.spawnClaudeAgent('agent-2', 'worker');
-  await broker.spawnClaudeAgent('agent-3', 'worker');
-
-  console.log('\nAgents actifs:', broker.getActiveAgents());
-
-  // Attendre que les agents soient prêts
-  await sleep(3000);
-
-  // Envoyer des tâches
-  console.log('\nEnvoi des tâches...');
-
-  await broker.send({
-    id: 'task-001',
-    from: 'orchestrator',
-    to: 'agent-2',
-    content: 'Liste les fichiers du répertoire courant',
-    timestamp: new Date(),
-    type: MessageType.TASK
-  });
-
-  await broker.send({
-    id: 'task-002',
-    from: 'orchestrator',
-    to: 'agent-3',
-    content: 'Affiche la date et heure système',
-    timestamp: new Date(),
-    type: MessageType.TASK
-  });
-
-  // Broadcast
-  await broker.broadcast({
-    id: 'broadcast-001',
-    from: 'orchestrator',
-    to: 'all',
-    content: 'Bienvenue dans le système multi-Claude!',
-    timestamp: new Date(),
-    type: MessageType.BROADCAST
-  });
-
-  // Attendre les résultats
-  console.log('\nEn attente des résultats (Ctrl+C pour arrêter)...\n');
-
-  // Garder le processus actif
-  process.on('SIGINT', async () => {
-    console.log('\n\nArrêt du système...');
-    await broker.disconnect();
-    process.exit(0);
-  });
-
-  // Boucle infinie pour garder le processus actif
-  while (true) {
-    await sleep(1000);
+  const isRedisAvailable = await redisClient.ping();
+  if (!isRedisAvailable) {
+    console.error('❌ Redis requis! Lancez: docker run -d -p 6379:6379 --name redis-orchestrator redis:alpine');
+    process.exit(1);
   }
+
+  console.log('     ✅ Redis connecté');
+
+  // 2. Création des composants Redis
+  console.log('[2/5] Création des composants...');
+  const broker = new RedisMessageBroker(redisClient);
+  const cache = new RedisCache(redisClient);
+  const stateStore = new RedisStateStore(redisClient);
+  const taskQueue = new RedisTaskQueue(redisClient);
+
+  await broker.connect();
+  console.log('     ✅ MessageBroker, Cache, StateStore, TaskQueue créés');
+
+  // 3. Enregistrement des domaines
+  console.log('[3/5] Enregistrement des domaines...');
+  registerDefaultDomains();
+  const registry = DomainRegistry.getInstance();
+  console.log(`     ✅ Domaines: ${registry.listDomains().join(', ')}`);
+
+  // 4. Création d'une équipe Social Media
+  console.log('[4/5] Création de l\'équipe Social Media...');
+  const factory = new TeamFactory({ messageBroker: broker });
+  const socialTeam = factory.createTeamFromDomain('social-media', 'ViralTeam');
+  console.log(`     ✅ Équipe: ${socialTeam.name} (${socialTeam.members.length} membres)`);
+
+  // 5. Simulateur d'APIs sociales
+  console.log('[5/5] Initialisation du simulateur...');
+  const simulator = new SocialApiSimulator(0.05);
+  console.log('     ✅ Simulateur prêt\n');
+
+  // Afficher le résumé
+  console.log('═══════════════════════════════════════════════════════════');
+  console.log(socialTeam.getTeamSummary());
+  console.log('═══════════════════════════════════════════════════════════\n');
+
+  // Exemple: Créer du contenu via le pipeline
+  console.log('Lancement du pipeline de création de contenu...\n');
+
+  const contentIdea = 'Vidéo TikTok sur les 5 tendances IA de 2025';
+  const pipeline = registry.get('social-media')?.pipelineSteps || [];
+
+  for (const roleId of pipeline) {
+    const member = socialTeam.getMemberByRole(roleId);
+    if (member) {
+      const task: ITask = {
+        id: `pipeline-${roleId}-${Date.now()}`,
+        from: `team:${socialTeam.id}`,
+        to: member.agent.id,
+        content: `[${roleId.toUpperCase()}] Traiter: ${contentIdea}`,
+        timestamp: new Date(),
+        type: MessageType.TASK,
+        priority: 1
+      };
+
+      await taskQueue.enqueue(task);
+      console.log(`  📤 Tâche: ${task.id} -> ${roleId}`);
+    }
+  }
+
+  // Stats de la queue
+  const queueSize = await taskQueue.size();
+  console.log(`\n📊 Tâches dans la queue: ${queueSize}`);
+
+  // Simulation de publication
+  console.log('\n🚀 Simulation de publication...');
+  const publishResult = await simulator.publish({
+    platform: 'tiktok' as any,
+    title: '5 tendances IA 2025',
+    description: 'Découvrez les innovations qui vont changer le monde!',
+    hashtags: ['IA', 'tech', 'innovation', '2025', 'futur']
+  });
+
+  if (publishResult.success) {
+    console.log(`  ✅ Publication: ${publishResult.post?.url}`);
+  } else {
+    console.log(`  ❌ Échec: ${publishResult.error}`);
+  }
+
+  // Stats
+  console.log('\n📈 Statistiques:');
+  console.log(simulator.getGlobalStats());
+
+  // Cleanup
+  console.log('\n🛑 Fermeture...');
+  await broker.disconnect();
+  await redisClient.disconnect();
+
+  console.log('✅ Terminé.');
 }
 
-function sleep(ms: number): Promise<void> {
-  return new Promise(resolve => setTimeout(resolve, ms));
-}
+// Exports
+export {
+  // Redis
+  RedisClient,
+  RedisMessageBroker,
+  RedisCache,
+  RedisStateStore,
+  RedisTaskQueue,
 
+  // Domaines
+  DomainRegistry,
+  registerDefaultDomains,
+
+  // Agents
+  CoordinatorAgent,
+  WorkerAgent,
+
+  // Teams
+  Team,
+  TeamFactory,
+
+  // Simulation
+  SocialApiSimulator
+};
+
+// Exécution
 main().catch(console.error);
