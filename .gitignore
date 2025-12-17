@@ -1,0 +1,9 @@
+# Fichiers de communication (générés au runtime)
+claude-comm/
+comm/
+logs/
+
+# Fichiers temporaires
+*.tmp
+*.lock
+.lock_*
