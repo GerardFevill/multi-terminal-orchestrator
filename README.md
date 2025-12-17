@@ -1,98 +1,72 @@
 # Multi-Claude Orchestrator
 
-Système multi-agents TypeScript avec principes SOLID.
-
-## Architecture SOLID
-
-```
-src/
-├── interfaces/           # (I) Interface Segregation
-│   ├── IAgent.ts         # IAgent, ITaskExecutor, ITaskDistributor
-│   ├── IMessage.ts       # IMessage, ITask, IResult
-│   └── IMessageBroker.ts # IMessageSender, IMessageReceiver
-├── agents/               # (O) Open/Closed + (L) Liskov
-│   ├── Agent.ts          # Classe abstraite de base
-│   ├── WorkerAgent.ts    # Exécute les tâches
-│   └── CoordinatorAgent.ts # Distribue les tâches
-├── communication/        # (D) Dependency Inversion
-│   └── FileMessageBroker.ts # Implémente IMessageBroker
-├── tasks/                # (S) Single Responsibility
-│   └── TaskHandlers.ts   # Strategy pattern pour les handlers
-├── utils/
-│   └── generateId.ts
-├── AgentFactory.ts       # Factory + DI
-└── index.ts              # Point d'entrée
-```
-
-## Principes SOLID appliqués
-
-### S - Single Responsibility
-Chaque classe a une seule responsabilité :
-- `Agent` : cycle de vie
-- `WorkerAgent` : exécution de tâches
-- `CoordinatorAgent` : distribution de tâches
-- `FileMessageBroker` : communication fichier
-
-### O - Open/Closed
-- `Agent` est une classe abstraite extensible
-- `TaskHandlers` permet d'ajouter des handlers sans modifier le code
-
-### L - Liskov Substitution
-- `WorkerAgent` et `CoordinatorAgent` peuvent remplacer `Agent`
-
-### I - Interface Segregation
-- `IMessageSender` et `IMessageReceiver` séparés
-- `ITaskExecutor` et `ITaskDistributor` séparés
-
-### D - Dependency Inversion
-- Les agents dépendent de `IMessageBroker`, pas de `FileMessageBroker`
-- Injection via constructeur
+Système multi-agents TypeScript avec principes SOLID. Lance de vrais terminaux Claude via `spawn`.
 
 ## Installation
 
 ```bash
 npm install
-npm run build
-npm start
+npm run dev
 ```
 
-## Utilisation
+## Architecture
+
+```
+src/
+├── index.ts                    # Point d'entrée (lance Claude)
+├── AgentFactory.ts             # Factory + Dependency Injection
+├── interfaces/                 # (I) Interface Segregation
+│   ├── IAgent.ts
+│   ├── IMessage.ts
+│   └── IMessageBroker.ts
+├── agents/                     # (O/L) Open/Closed + Liskov
+│   ├── Agent.ts                # Classe abstraite
+│   ├── WorkerAgent.ts
+│   └── CoordinatorAgent.ts
+├── communication/
+│   ├── ClaudeProcessBroker.ts  # Lance Claude via spawn()
+│   └── FileMessageBroker.ts    # Communication fichier
+├── tasks/
+│   └── TaskHandlers.ts         # Strategy pattern
+└── utils/
+    └── generateId.ts
+```
+
+## Principes SOLID
+
+| Principe | Application |
+|----------|-------------|
+| **S** Single Responsibility | 1 classe = 1 responsabilité |
+| **O** Open/Closed | Agent extensible sans modification |
+| **L** Liskov Substitution | Worker/Coordinator remplacent Agent |
+| **I** Interface Segregation | IMessageSender ≠ IMessageReceiver |
+| **D** Dependency Inversion | Injection de IMessageBroker |
+
+## Comment ça marche
 
 ```typescript
-import { AgentFactory } from './AgentFactory';
-import { AgentRole } from './interfaces/IAgent';
+// Lance 3 terminaux Claude
+const broker = new ClaudeProcessBroker('./claude-comm');
+await broker.spawnClaudeAgent('agent-1', 'coordinator');
+await broker.spawnClaudeAgent('agent-2', 'worker');
+await broker.spawnClaudeAgent('agent-3', 'worker');
 
-const factory = new AgentFactory('./comm');
-const { coordinator, workers } = factory.createSystem(3);
-
-await coordinator.start();
-workers.forEach(w => w.start());
-
-await coordinator.createTask('CALC: 2 + 2');
-await coordinator.broadcastToWorkers('Hello!');
+// Envoie une tâche
+await broker.send({
+  id: 'task-001',
+  to: 'agent-2',
+  content: 'Liste les fichiers',
+  type: MessageType.TASK
+});
 ```
 
-## Diagramme de classes
+## Communication
+
+Les agents communiquent via `claude-comm/` :
 
 ```
-┌─────────────────┐
-│   <<interface>> │
-│    IAgent       │
-└────────┬────────┘
-         │
-         ▼
-┌─────────────────┐     ┌─────────────────────┐
-│  Agent (abs)    │────►│ <<interface>>       │
-│                 │     │ IMessageBroker      │
-│ + start()       │     └──────────┬──────────┘
-│ + stop()        │                │
-└────────┬────────┘                ▼
-         │                ┌─────────────────────┐
-    ┌────┴────┐           │ FileMessageBroker   │
-    │         │           └─────────────────────┘
-    ▼         ▼
-┌────────┐ ┌─────────────┐
-│ Worker │ │ Coordinator │
-│ Agent  │ │ Agent       │
-└────────┘ └─────────────┘
+claude-comm/
+├── tasks/       # Tâches par agent
+├── results/     # Résultats par agent
+└── messages/    # Messages inter-agents
 ```

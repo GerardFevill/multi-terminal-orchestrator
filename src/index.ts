@@ -1,63 +1,80 @@
 /**
- * Point d'entrée - Orchestration du système multi-agents
+ * Point d'entrée - Lance de vrais terminaux Claude
  */
 
-import { AgentFactory } from './AgentFactory';
-import { CoordinatorAgent } from './agents/CoordinatorAgent';
-import { WorkerAgent } from './agents/WorkerAgent';
+import { ClaudeProcessBroker } from './communication/ClaudeProcessBroker';
+import { MessageType } from './interfaces/IMessage';
 
 async function main() {
   console.log('╔═══════════════════════════════════════════════════════════╗');
-  console.log('║   SYSTÈME MULTI-AGENTS TYPESCRIPT - SOLID                 ║');
+  console.log('║   MULTI-CLAUDE ORCHESTRATOR - TypeScript + SOLID          ║');
   console.log('╚═══════════════════════════════════════════════════════════╝\n');
 
-  // Créer la factory avec le chemin de communication
-  const factory = new AgentFactory('./claude-comm');
+  const broker = new ClaudeProcessBroker('./claude-comm');
 
-  // Créer le système avec 1 coordinator + 3 workers
-  const { coordinator, workers } = factory.createSystem(3);
+  // Initialiser
+  await broker.connect();
 
-  // Démarrer tous les agents
-  console.log('Démarrage des agents...\n');
+  // Lancer les agents Claude
+  console.log('Lancement des agents Claude...\n');
+  await broker.spawnClaudeAgent('agent-1', 'coordinator');
+  await broker.spawnClaudeAgent('agent-2', 'worker');
+  await broker.spawnClaudeAgent('agent-3', 'worker');
 
-  await coordinator.start();
-  for (const worker of workers) {
-    await worker.start();
-  }
+  console.log('\nAgents actifs:', broker.getActiveAgents());
 
-  console.log('\n--- Système prêt ---\n');
+  // Attendre que les agents soient prêts
+  await sleep(3000);
 
-  // Créer quelques tâches de test
-  await coordinator.createTask('CALC: 42 * 17');
-  await coordinator.createTask('SHELL: date');
-  await coordinator.createTask('Tâche générique de test');
+  // Envoyer des tâches
+  console.log('\nEnvoi des tâches...');
+
+  await broker.send({
+    id: 'task-001',
+    from: 'orchestrator',
+    to: 'agent-2',
+    content: 'Liste les fichiers du répertoire courant',
+    timestamp: new Date(),
+    type: MessageType.TASK
+  });
+
+  await broker.send({
+    id: 'task-002',
+    from: 'orchestrator',
+    to: 'agent-3',
+    content: 'Affiche la date et heure système',
+    timestamp: new Date(),
+    type: MessageType.TASK
+  });
 
   // Broadcast
-  await coordinator.broadcastToWorkers('Bienvenue dans le système!');
+  await broker.broadcast({
+    id: 'broadcast-001',
+    from: 'orchestrator',
+    to: 'all',
+    content: 'Bienvenue dans le système multi-Claude!',
+    timestamp: new Date(),
+    type: MessageType.BROADCAST
+  });
 
   // Attendre les résultats
-  await sleep(5000);
+  console.log('\nEn attente des résultats (Ctrl+C pour arrêter)...\n');
 
-  // Afficher les résultats
-  console.log('\n--- Résultats ---\n');
-  for (const result of coordinator.getResults()) {
-    console.log(`Task ${result.taskId}: ${result.success ? '✓' : '✗'}`);
-    console.log(`  Data: ${JSON.stringify(result.data)}\n`);
+  // Garder le processus actif
+  process.on('SIGINT', async () => {
+    console.log('\n\nArrêt du système...');
+    await broker.disconnect();
+    process.exit(0);
+  });
+
+  // Boucle infinie pour garder le processus actif
+  while (true) {
+    await sleep(1000);
   }
-
-  // Arrêter le système
-  console.log('\nArrêt du système...');
-  for (const worker of workers) {
-    await worker.stop();
-  }
-  await coordinator.stop();
-
-  console.log('\n✓ Système arrêté proprement');
 }
 
 function sleep(ms: number): Promise<void> {
   return new Promise(resolve => setTimeout(resolve, ms));
 }
 
-// Lancer si exécuté directement
 main().catch(console.error);
