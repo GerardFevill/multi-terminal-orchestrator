@@ -1,50 +1,48 @@
-# Multi-Terminal Demo
+# Multi-Claude Orchestrator
 
-Projet de démonstration pour la gestion de plusieurs terminaux et la communication entre processus.
+Système multi-agents permettant à plusieurs instances Claude de communiquer et collaborer via des fichiers partagés.
 
 ## Structure
 
 ```
 multi-terminal-demo/
-├── orchestrator.sh      # Orchestrateur interactif (menu)
-├── demo.sh              # Démonstration automatique
-├── workers/
-│   ├── producer.sh      # Génère des données
-│   ├── consumer.sh      # Traite les données
-│   └── monitor.sh       # Surveille le système
-├── comm/                # Fichiers de communication
-│   ├── data_queue.txt   # Queue des données
-│   ├── messages.queue   # Messages broadcast
-│   ├── status.txt       # Statut global
-│   └── processed_*.txt  # Résultats traités
-└── logs/                # Logs des workers
+├── setup-multi-claude.sh      # Setup et instructions
+├── start-claude-agent.sh      # Lancer un agent Claude
+├── claude-orchestrator.sh     # Orchestrateur interactif
+└── claude-comm/               # Fichiers de communication (généré)
+    ├── tasks/                 # Tâches par agent
+    ├── results/               # Résultats par agent
+    ├── messages/              # Messages inter-agents
+    └── broadcast.txt          # Messages globaux
 ```
 
-## Méthodes de Communication
+## Utilisation rapide
 
-1. **File de données** (`data_queue.txt`) - Queue FIFO avec verrou pour producteur/consommateur
-2. **Messages broadcast** (`messages.queue`) - Messages diffusés à tous les workers
-3. **Statut global** (`status.txt`) - Signal d'arrêt/démarrage
-4. **Verrous** (`.lock_*`) - Évite les accès concurrents
-
-## Utilisation
-
-### Démonstration automatique
 ```bash
-./demo.sh
+./setup-multi-claude.sh
 ```
-Lance 2 producteurs, 2 consommateurs et 1 moniteur. Ctrl+C pour arrêter.
 
-### Mode interactif
+Puis dans des terminaux séparés :
+
 ```bash
-./orchestrator.sh
+./start-claude-agent.sh coordinator agent-1
+./start-claude-agent.sh worker agent-2
+./start-claude-agent.sh worker agent-3
 ```
-Menu pour gérer manuellement les workers.
 
-## Comment ça marche
+## Communication entre agents
 
-1. **Producteurs** génèrent des données aléatoires toutes les 1-3 secondes
-2. **Consommateurs** lisent et traitent les données (multiplication par 2)
-3. **Moniteur** affiche un rapport toutes les 5 secondes
-4. Tous les workers écoutent les messages broadcast
-5. Le statut global permet d'arrêter proprement tous les workers
+| Action | Commande |
+|--------|----------|
+| Lire ses tâches | `cat claude-comm/tasks/agent-X_tasks.txt` |
+| Écrire un résultat | `echo "RESULT: done" >> claude-comm/results/agent-X_results.txt` |
+| Envoyer un message | `echo "FROM:agent-X\|msg" >> claude-comm/messages/to_agent-Y.txt` |
+| Broadcast | `echo "msg" >> claude-comm/broadcast.txt` |
+
+## Orchestrateur interactif
+
+```bash
+./claude-orchestrator.sh
+```
+
+Menu pour envoyer des tâches, broadcaster, et voir les résultats.
