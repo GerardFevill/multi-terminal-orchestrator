@@ -1,0 +1,25 @@
+{
+  "name": "multi-claude-orchestrator",
+  "version": "1.0.0",
+  "description": "Système multi-agents TypeScript avec principes SOLID",
+  "main": "dist/index.js",
+  "scripts": {
+    "build": "tsc",
+    "start": "node dist/index.js",
+    "dev": "ts-node src/index.ts",
+    "clean": "rm -rf dist"
+  },
+  "keywords": [
+    "multi-agent",
+    "orchestrator",
+    "typescript",
+    "solid"
+  ],
+  "author": "",
+  "license": "MIT",
+  "devDependencies": {
+    "@types/node": "^20.0.0",
+    "ts-node": "^10.9.0",
+    "typescript": "^5.0.0"
+  }
+}

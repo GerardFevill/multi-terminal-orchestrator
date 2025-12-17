@@ -1,48 +1,98 @@
 # Multi-Claude Orchestrator
 
-Système multi-agents permettant à plusieurs instances Claude de communiquer et collaborer via des fichiers partagés.
+Système multi-agents TypeScript avec principes SOLID.
 
-## Structure
+## Architecture SOLID
 
 ```
-multi-terminal-demo/
-├── setup-multi-claude.sh      # Setup et instructions
-├── start-claude-agent.sh      # Lancer un agent Claude
-├── claude-orchestrator.sh     # Orchestrateur interactif
-└── claude-comm/               # Fichiers de communication (généré)
-    ├── tasks/                 # Tâches par agent
-    ├── results/               # Résultats par agent
-    ├── messages/              # Messages inter-agents
-    └── broadcast.txt          # Messages globaux
+src/
+├── interfaces/           # (I) Interface Segregation
+│   ├── IAgent.ts         # IAgent, ITaskExecutor, ITaskDistributor
+│   ├── IMessage.ts       # IMessage, ITask, IResult
+│   └── IMessageBroker.ts # IMessageSender, IMessageReceiver
+├── agents/               # (O) Open/Closed + (L) Liskov
+│   ├── Agent.ts          # Classe abstraite de base
+│   ├── WorkerAgent.ts    # Exécute les tâches
+│   └── CoordinatorAgent.ts # Distribue les tâches
+├── communication/        # (D) Dependency Inversion
+│   └── FileMessageBroker.ts # Implémente IMessageBroker
+├── tasks/                # (S) Single Responsibility
+│   └── TaskHandlers.ts   # Strategy pattern pour les handlers
+├── utils/
+│   └── generateId.ts
+├── AgentFactory.ts       # Factory + DI
+└── index.ts              # Point d'entrée
 ```
 
-## Utilisation rapide
+## Principes SOLID appliqués
+
+### S - Single Responsibility
+Chaque classe a une seule responsabilité :
+- `Agent` : cycle de vie
+- `WorkerAgent` : exécution de tâches
+- `CoordinatorAgent` : distribution de tâches
+- `FileMessageBroker` : communication fichier
+
+### O - Open/Closed
+- `Agent` est une classe abstraite extensible
+- `TaskHandlers` permet d'ajouter des handlers sans modifier le code
+
+### L - Liskov Substitution
+- `WorkerAgent` et `CoordinatorAgent` peuvent remplacer `Agent`
+
+### I - Interface Segregation
+- `IMessageSender` et `IMessageReceiver` séparés
+- `ITaskExecutor` et `ITaskDistributor` séparés
+
+### D - Dependency Inversion
+- Les agents dépendent de `IMessageBroker`, pas de `FileMessageBroker`
+- Injection via constructeur
+
+## Installation
 
 ```bash
-./setup-multi-claude.sh
+npm install
+npm run build
+npm start
 ```
 
-Puis dans des terminaux séparés :
+## Utilisation
 
-```bash
-./start-claude-agent.sh coordinator agent-1
-./start-claude-agent.sh worker agent-2
-./start-claude-agent.sh worker agent-3
+```typescript
+import { AgentFactory } from './AgentFactory';
+import { AgentRole } from './interfaces/IAgent';
+
+const factory = new AgentFactory('./comm');
+const { coordinator, workers } = factory.createSystem(3);
+
+await coordinator.start();
+workers.forEach(w => w.start());
+
+await coordinator.createTask('CALC: 2 + 2');
+await coordinator.broadcastToWorkers('Hello!');
 ```
 
-## Communication entre agents
+## Diagramme de classes
 
-| Action | Commande |
-|--------|----------|
-| Lire ses tâches | `cat claude-comm/tasks/agent-X_tasks.txt` |
-| Écrire un résultat | `echo "RESULT: done" >> claude-comm/results/agent-X_results.txt` |
-| Envoyer un message | `echo "FROM:agent-X\|msg" >> claude-comm/messages/to_agent-Y.txt` |
-| Broadcast | `echo "msg" >> claude-comm/broadcast.txt` |
-
-## Orchestrateur interactif
-
-```bash
-./claude-orchestrator.sh
 ```
-
-Menu pour envoyer des tâches, broadcaster, et voir les résultats.
+┌─────────────────┐
+│   <<interface>> │
+│    IAgent       │
+└────────┬────────┘
+         │
+         ▼
+┌─────────────────┐     ┌─────────────────────┐
+│  Agent (abs)    │────►│ <<interface>>       │
+│                 │     │ IMessageBroker      │
+│ + start()       │     └──────────┬──────────┘
+│ + stop()        │                │
+└────────┬────────┘                ▼
+         │                ┌─────────────────────┐
+    ┌────┴────┐           │ FileMessageBroker   │
+    │         │           └─────────────────────┘
+    ▼         ▼
+┌────────┐ ┌─────────────┐
+│ Worker │ │ Coordinator │
+│ Agent  │ │ Agent       │
+└────────┘ └─────────────┘
+```
